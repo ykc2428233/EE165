@@ -1,0 +1,70 @@
+m255
+K4
+z2
+!s11f vlog 2020.1_1 2020.03, Mar  4 2020
+13
+!s112 1.1
+!i10d 8192
+!i10e 25
+!i10f 100
+cModel Technology
+Z0 d/home/runner
+T_opt
+!s110 1614581996
+V>0YMD>N=gHZE21@0DSeaH1
+04 7 4 work tn_fifo fast 0
+=1-000ae431a4f1-603c90ec-47236-b
+o-quiet -auto_acc_if_foreign -work work +acc=npr
+Z1 tCvgOpt 0
+n@_opt
+OL;O;2020.1_1;71
+vfifo
+Z2 DXx6 sv_std 3 std 0 22 9oUSJO;AeEaW`l:M@^WG92
+Z3 !s110 1614581995
+!i10b 1
+!s100 B57Q@63]kWBWR>OTVD<f=1
+Z4 !s11b Dg1SIo80bB@j0V0VzS_@n1
+I0gK6coON^AeX=h58FGkm`3
+Z5 VDg1SIo80bB@j0V0VzS_@n1
+S1
+R0
+Z6 w1614581994
+8design.sv
+Fdesign.sv
+!i122 0
+L0 1 56
+Z7 OL;L;2020.1_1;71
+r1
+!s85 0
+31
+Z8 !s108 1614581995.000000
+Z9 !s107 testbench.sv|design.sv|
+Z10 !s90 -writetoplevels|questa.tops|-timescale|1ns/1ns|design.sv|testbench.sv|
+!i113 0
+Z11 o-timescale 1ns/1ns
+R1
+vtn_fifo
+R2
+R3
+!i10b 1
+!s100 @VEFIFH1f9GeGW;QLTGjQ0
+R4
+IU0c_=8C^:OWRP:oSBdEUA2
+R5
+S1
+R0
+R6
+8testbench.sv
+Ftestbench.sv
+!i122 0
+L0 1 104
+R7
+r1
+!s85 0
+31
+R8
+R9
+R10
+!i113 0
+R11
+R1

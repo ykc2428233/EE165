@@ -1,0 +1,261 @@
+// Code your testbench here
+// or browse Examples
+parameter MAX_PACKETS_PER_CYCLE=5;
+parameter MESH_SIZE=4;		// For a 4x4 mesh.
+parameter N_PACKETS_TO_SEND=20;	// How long the test will be
+
+import mesh_defs::*;		// Some common functions & definitions
+
+/* The Sim_control class contains all of the knobs that control our RCG. It has
+ * various knobs to control what packets are generated.
+ * Sim_control is also our runtime random-packet generator. It has the smarts to
+ * generate lots of packets, over and over, that fit the distribution that the
+ * knobs tell it to.
+ */
+class Sim_control;
+  //... you probably want to declare instance variables here to store the ...
+  //... knob values that new() gets ...
+  Ring_slot slots[MAX_PACKETS_PER_CYCLE];  
+  int packets_per_cycle;//shouldn't be larger than MAX_PACKETS_PER_CYCLE
+  int random_packets=0;//whether generate random number of packets 0 or 1
+  int upper, lower;//the range of number when generate random number of packets
+  int randomtake = 0;//set 0 to take every cycle, set 1 to take randomly
+  // The new() method gets called when you create a new Sim_control object. You
+  // give new() your knob values; it saves them so that make_packets() and
+  // take_results() can access them.
+  function new (int num_packets=3, int random=0, int up=4, int low=1, int random_take=0);
+    packets_per_cycle=num_packets;
+    random_packets=random;
+    upper=up;
+    lower=low;
+    randomtake=random_take;
+	//... fill this in however you like ...
+
+  endfunction : new
+
+  function int make_packets (ref Ring_slot RS_array[MAX_PACKETS_PER_CYCLE]);
+	//... use your knobs to pick the constrained-random packets ...
+	//... that you return in RS_array[]...
+        int n=0;//determine if the packets are valid
+    int num_packet=packets_per_cycle;
+    
+    if(random_packets) begin
+      packets_per_cycle=$urandom_range(upper, lower)  ;  
+      num_packet=packets_per_cycle;
+    end;
+
+    if (packets_per_cycle==0) return 0;
+    
+//generate packets_oer_cycle packets
+    for (int i=0; i<packets_per_cycle; ++i) begin
+      slots[i] = '{$urandom_range(15, 0),1,0,0,$urandom_range(MESH_SIZE-1, 0),$urandom_range(MESH_SIZE-1, 0),$urandom_range(MESH_SIZE-1, 0),$urandom_range(MESH_SIZE-1, 0)};       
+    end
+
+//see if there're packets with the same source address
+    for(int index=0; index<packets_per_cycle; ++index) begin
+    for (int i=0; i<packets_per_cycle; ++i) begin
+      if((slots[index].src_x==slots[i].src_x)&&(slots[index].src_y==slots[i].src_y)&&(index!=i)&&slots[i].valid) begin
+        num_packet=num_packet-1;
+        slots[i]=EMPTY_RING_SLOT;
+      end
+       end
+      if (slots[index].valid) begin
+        RS_array[n]=slots[index];
+        n=n+1;
+      end
+    end       
+    return (num_packet);
+  endfunction : make_packets
+
+  // Once the mesh has a result ready for us, the TB calls take_results() to
+  // decide whether to take it immediately or let it wait for a future cycle.
+  // Letting it wait will force the FIFOs to fill up more.
+  function bit take_results();
+
+    /*int cycle;
+    cycle = $time / 20;		// Because our clock period is 20.
+    
+    if (randomtake) begin
+      if (cycle % 2 != 0)	// take packets every two cycle
+	return (0);	
+    end
+    return (1);*/
+    if (randomtake)
+      return ($urandom_range(1, 0));
+    
+    return 1;
+  endfunction : take_results
+endclass : Sim_control
+
+// This is the top-level module for the testbench.
+module automatic tb_mesh;
+
+  // Declare top-level wires. The other wires are all inside of mesh_NxN.
+  logic reset, clk;
+  logic venv_taking_data[MESH_SIZE][MESH_SIZE],
+	data_avail_for_venv[MESH_SIZE][MESH_SIZE],
+	can_accept_data_from_env[MESH_SIZE][MESH_SIZE];
+
+  Ring_slot data_from_venv [MESH_SIZE][MESH_SIZE],
+	    data_to_venv[MESH_SIZE][MESH_SIZE];
+
+  // As we launch packets, we'll save them here so we can check them later.
+  Ring_slot packet_history [N_PACKETS_TO_SEND];
+
+  // Instantiate the top-level simulation-control object.
+  Sim_control SC = new(/*.num_packets(5),.random(1),.low(0),.up(5),.random_take(0)*/);
+  //random for generate random num(low,up) of packets ; random take for set the take random or always 1
+
+  // Instantiate the NxN mesh
+  mesh_NxN #(.N(MESH_SIZE)) M_NxN (.*);
+
+  // Drive the main clock
+  initial begin
+      $dumpfile("dump.vcd");
+      $dumpvars();
+      clk = 0;
+      forever begin	// eventually "tester" will call $stop to end the sim.
+          #10;
+          clk = ~clk;
+      end
+  end
+
+  // The "tester" block, which is in charge of generating stimuli and driving
+  // them into the DUT.
+  //	- First drive reset on & off.
+  //	- Then just keep driving packets into the mesh. Don't check them --
+  //	  that's for the "mesh_checker" block.
+  initial begin : tester
+    int perc, good, n_bins;	// For coverage stats
+    Ring_slot RS;
+    automatic int
+	n_pack_sent=0,	// number ever sent, so we know when to stop sending.
+	n_pack_now=0;	// number to send in the current cycle
+    Ring_slot RS_this_cycle[MAX_PACKETS_PER_CYCLE];	// to send right now
+
+    // Clear the packet history before we start filling it.
+    for (int i=0; i<N_PACKETS_TO_SEND; ++i)
+	packet_history[i] = EMPTY_RING_SLOT;
+      
+    // Clear out the signals that we drive into the mesh, to avoid Xes.
+    for (int y=0; y<MESH_SIZE; ++y)
+	for (int x=0; x<MESH_SIZE; ++x) begin
+	    venv_taking_data[y][x]=1'b0;
+	    data_from_venv[y][x] = EMPTY_RING_SLOT;
+	end
+
+    // Start the sim by doing a reset.
+    $display ("Starting the sim!");
+    reset = 1'b1;
+    repeat (8) @(negedge clk);
+    reset = 1'b0;
+
+    // Main loop -- send the packets.
+    forever begin
+	@(negedge clk);
+
+	// First stop sending the packets we sent last cycle. The mesh keys off
+	// our packet having .valid=1, so set .valid to 0.
+	for (int i=0; i<n_pack_now; ++i) begin
+	    RS = RS_this_cycle[i];
+	    RS.valid=0;
+	    data_from_venv[RS.src_y][RS.src_x] = RS;
+	end
+
+	// Exit from the "forever" loop here to ensure that the final packets
+	// we send do get their data_from_venv.valid signals cleared.
+	if (n_pack_sent>=N_PACKETS_TO_SEND) break;
+
+	// Get new packets for this cycle, and ensure there's not too many.
+	n_pack_now = SC.make_packets (RS_this_cycle);
+	if (n_pack_sent+n_pack_now > N_PACKETS_TO_SEND)
+	    n_pack_now = N_PACKETS_TO_SEND-n_pack_sent;
+
+	// Send the new packets
+	for (int i=0; i<n_pack_now; ++i) begin
+	    // Inject this packet.
+	    RS = RS_this_cycle[i];
+	    if (can_accept_data_from_env[RS.src_y][RS.src_x]) begin
+		$display ("T=%0t: launching packet #%0d, %s",
+			$time, n_pack_sent, print_RS(RS));
+		packet_history[n_pack_sent] = RS; // Save it for later checking.
+		data_from_venv[RS.src_y][RS.src_x] = RS;
+		n_pack_sent++;
+	    end
+	end
+    end; // while not all packets sent
+
+    $display ("Done launching packets!");
+
+    // Allow 100 cycles for the sim to finish after we stop sending packets, and
+    // then kill it. This ensures that we don't hang if the checker fails to
+    // stop the sim (e.g., if we lose a packet).
+    repeat (100) @(negedge clk);
+    $display ("Stopping simulation due to timeout; not all packets received");
+    $stop;
+  end : tester
+
+  // Now, the checker block. It's responsible for receiving packets from the
+  // mesh (which does involve a handshake), and then checking that the packets
+  // were sent correctly.
+  initial begin : mesh_checker
+    int x, y; // to loop through each MS and look for outgoing packets
+    automatic int n_pack_recvd=0; // Track how many packets we've received.
+    int match;		// Which packet we received
+    bit take;
+    string suffix;
+    Ring_slot RS;
+
+    // Weird stuff can happen during reset, so don't start looking for packets
+    // until that's done.
+    while (reset == 1'b1)
+	@(negedge clk);
+
+    // Main loop -- listen for packets.
+    while (n_pack_recvd<N_PACKETS_TO_SEND) begin
+	@(negedge clk);
+
+	// Check every mesh stop to see if a new packet has arrived this cycle.
+	for (y=0; y<MESH_SIZE; ++y) begin
+	    for (x=0; x<MESH_SIZE; ++x) begin
+		// We only take a packet if one is actually ready, and if we
+		// decide to take it (rather than to let it wait to increase
+		// congestion).
+		take = data_avail_for_venv[y][x] && SC.take_results();
+		if (!take) begin
+		    // Turn off any handshakes from last cycle.
+		    venv_taking_data[y][x]=0;
+		    continue;
+		end
+
+		// OK, there's a packet here and we're taking it.
+		n_pack_recvd++;	// So we know when we're done.
+
+		// Start handshake to take the packet.
+		venv_taking_data[y][x]=1;
+
+		// Print & check if it's correct
+		RS = data_to_venv[y][x];
+		match=-1; suffix = "NOT found";
+		for (int i=0; (i<N_PACKETS_TO_SEND)&& (match<0); ++i) begin
+		    if (packet_history[i].valid	&&(packet_history[i]==RS)) begin
+			packet_history[i].valid = 1'b0;	// Mark as found.
+			match=i;
+			suffix = $sformatf("packet #%0d", match);
+		    end
+		end	// checking if found
+		if ((RS.dst_y != y) || (RS.dst_x != x)) begin
+		    suffix = {suffix, " wrong destination"};
+		    match = -1;
+		end
+		$display("%0d. T=%0T: data_avail_for_venv[%0d][%0d]; %s, %s",
+		      n_pack_recvd, $time, y, x, print_RS(RS),suffix);
+		if (match<0) $stop;
+	    end // for x
+	end // for y
+    end // while all packets not received yet.
+    $display ("Received all %0d packets!", n_pack_recvd);
+    $stop;
+  end : mesh_checker
+
+endmodule : tb_mesh

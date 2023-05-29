@@ -1,0 +1,125 @@
+module tb_fifo;
+
+  // Declare top-level wires.
+  parameter N_ADDR_BITS=2, FIFO_WIDTH=2;
+  logic reset, rd_en, wr_en, clk, fifo_empty, fifo_full;
+  logic[1:0] wr_data, fifo_rd_data;
+  logic[2:0] wr_ptr, rd_ptr;
+
+    fifo F(
+    .reset(reset),
+    .rd_en(rd_en),
+    .wr_en(wr_en),
+    .clk(clk),
+    .empty(fifo_empty),
+    .full(fifo_full),
+    .rd_data(fifo_rd_data),
+    .wr_data(wr_data),
+    .wr_ptr(wr_ptr),
+    .rd_ptr(rd_ptr)
+  );
+  //reference
+  parameter n_flops = 1 << N_ADDR_BITS; //4 flops
+  logic [FIFO_WIDTH-1:0] flops [n_flops-1:0]; //4 flops each contains 2 bits
+  logic [1:0] rm_rd_data;
+  logic full, empty;
+  int n_items; //item count
+  
+  always_ff @(posedge clk) begin
+    if (reset)
+      begin
+        n_items <= 0;
+        flops[0] <= 0;
+        flops[1] <= 0;
+        flops[2] <= 0;
+        flops[3] <= 0;
+      end
+  end
+  
+  always_ff @(posedge clk) begin
+    if (wr_en && !full && !reset)
+      begin
+        flops[0] <= wr_data;
+        flops[1] <= flops[0];
+        flops[2] <= flops[1];
+        flops[3] <= flops[2];
+      end
+    if (rd_en && !empty && !reset && !wr_en)
+      begin
+        n_items <= n_items - 1;
+      end
+    if (!reset && wr_en && !full && (!rd_en || empty))
+      begin
+        n_items <= n_items + 1;
+      end
+  end
+  
+  always_comb begin
+    full = (n_items == 4);
+    empty = (n_items == 0);
+    if (!empty && !reset) begin
+      rm_rd_data = flops[n_items - 1];   
+    end
+  end
+
+
+  // Drive the main clock
+  initial begin
+      $dumpfile("dump.vcd");
+      $dumpvars();
+
+      // The clock starts at 0 and toggles every 10 time units.
+      clk = 0;
+      forever begin	// eventually "tester" will call $stop to end the sim.
+	   #10 clk = ~clk;
+      end
+  end
+
+  // A function to choose & return random FIFO-input data.
+  function logic[1:0] get_data();
+      return $random;
+  endfunction: get_data
+
+  // The top-level tester routine.
+  //	- Drive reset on & off.
+  //	- Many loops of (pick operands; drive them; check results).
+  initial begin : tester
+      // Reset the system
+      $display ("Starting the sim!");
+      reset = 1'b1;
+      @(negedge clk);
+      reset = 1'b0;
+      // Drive the simulation with 10 cycles of driving wr_data with new
+      // random data. This simple testbench both reads and writes every cycle.
+    repeat (10) begin
+        wr_en = 1;
+        rd_en = 1;
+        wr_data = get_data();
+        @(negedge clk);
+      end
+
+    repeat (3) begin
+        wr_en = 0;
+        rd_en = 1;
+        wr_data = get_data();
+        @(negedge clk);
+      end
+    
+    repeat (5) begin
+        wr_en = 1;
+        rd_en = 0;
+        wr_data = get_data();
+        @(negedge clk);
+      end
+      // The $stop is not to stop *this* block (which would just run to its end
+      // and finish), but rather to stop the "always" blocks above.
+      $stop;
+  end : tester
+  scoreboard_checker_rd_data: assert property (@(posedge clk) rm_rd_data === fifo_rd_data )
+    else $strobe ("T=%0t: SB=%0x, DUT=%0x", $time,rm_rd_data,fifo_rd_data);
+    scoreboard_checker_empty: assert property  (@(posedge clk) disable iff(reset) empty === fifo_empty )
+      else $strobe ("T=%0t: SB_empty=%0x, DUT_empty=%0x", $time,empty,fifo_empty);
+      scoreboard_checker_full: assert property  (@(posedge clk) disable iff(reset) full === fifo_full )
+      else $strobe ("T=%0t: SB_full=%0x, DUT_full=%0x", $time,full,fifo_full);
+    
+endmodule : tb_fifo

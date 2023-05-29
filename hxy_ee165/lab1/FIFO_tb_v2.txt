@@ -1,0 +1,60 @@
+module tn_fifo ();
+  parameter N_ADDR_BITS=2, FIFO_WIDTH=2;
+  logic reset, rd_en, wr_en, clk, fifo_empty, fifo_full;
+  logic[FIFO_WIDTH-1:0] wr_data, rd_data;
+
+  
+  fifo F (
+    .reset(reset),
+    .rd_en(rd_en),
+    .wr_en(wr_en),
+    .clk(clk),
+    .empty(fifo_empty),
+    .full(fifo_full),
+    .rd_data(rd_data),
+    .wr_data(wr_data)
+  );
+  
+  initial
+  begin
+    $dumpfile("dump.vcd");
+    $dumpvars();
+  end
+  
+  initial forever #10 clk = ~clk;
+  
+  function logic[FIFO_WIDTH-1:0] get_data();
+    return $random;
+  endfunction: get_data
+  
+  initial
+  begin
+    clk = 0;
+    reset = 1;
+    rd_en = 0;
+    wr_en = 0;
+    @(negedge clk);
+    @(negedge clk);
+    reset = 0;
+    
+    repeat (6)
+    begin
+      wr_en = 1;
+      repeat (3)
+      begin
+        wr_data=get_data();
+        @(negedge clk);
+      end
+      wr_en = 0;
+      rd_en = 1;
+      repeat (2)
+      begin
+        wr_data=get_data();
+        @(negedge clk);
+      end
+      rd_en = 0;
+    end
+    $stop;
+  end
+  
+endmodule

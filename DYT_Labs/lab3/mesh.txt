@@ -1,0 +1,306 @@
+///////////////////////////////////////////////////fifo///////////////////////////////////////////////////
+module fifo #(parameter type DATA_TYPE=logic[1:0], parameter N_ADDR_BITS=2)
+	(input logic reset, rd_en, wr_en, clk,
+	 input DATA_TYPE wr_data,
+	 output logic empty, full,
+     output logic[N_ADDR_BITS:0] rd_ptr, wr_ptr,
+	 output DATA_TYPE rd_data);
+    parameter FIFO_DEPTH = 1 << N_ADDR_BITS;
+
+    DATA_TYPE fifo_mem[FIFO_DEPTH-1:0];	// The actual memory
+    // Our rd and wr pointers include an extra MSB bit to distinguish between
+    // Empty vs. Full.
+    //logic [N_ADDR_BITS:0] rd_ptr, wr_ptr;
+
+    always_ff @(posedge clk) begin
+	// Clear the read and write pointers synchronously if reset is asserted.
+	
+      if(reset)
+        begin
+        rd_ptr <= 0;
+        wr_ptr <= 0;
+        fifo_mem[0] <= 0;
+        fifo_mem[1] <= 0;
+        fifo_mem[2] <= 0;
+        fifo_mem[3] <= 0;
+        end
+      else if (wr_en && !full)
+        begin
+          fifo_mem[wr_ptr[N_ADDR_BITS-1:0]] <= wr_data;
+          wr_ptr <= wr_ptr + 1;
+        end
+    end
+        
+    always_ff @(posedge clk) begin
+      if (!reset && rd_en && !empty)
+        begin
+          rd_ptr <= rd_ptr + 1;
+        end
+    end
+   
+    always_comb begin
+      empty = (wr_ptr==rd_ptr);
+      full = ((wr_ptr[N_ADDR_BITS-1:0]==rd_ptr[N_ADDR_BITS-1:0])&&(wr_ptr[N_ADDR_BITS]!=rd_ptr[N_ADDR_BITS]));
+      if (!empty && !reset) begin
+        rd_data = fifo_mem[rd_ptr[N_ADDR_BITS-1:0]];   
+      end
+
+    end
+  
+endmodule
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+///////////////////////////////////////////////////mesh def///////////////////////////////////////////////////
+
+package mesh_defs;
+
+parameter RING_DATA_WIDTH=4,	// 4-bit data packets
+	  MESH_ADDR_BITS=2;	// max 4x4 mesh size.
+
+typedef struct packed {
+  logic [RING_DATA_WIDTH-1:0] data;	// the actual data! 4bits data
+    logic valid;			// is this slot being used?
+    logic reserved;			// to avoid a mesh stop being starved
+    logic[1:0] unused;			// so that valid & reserved make an even
+					// byte for easier debug.
+    logic[MESH_ADDR_BITS-1:0] src_y, src_x,	// source stop (just for debug)
+			      dst_y, dst_x;	// destination mesh stop
+} Ring_slot;
+parameter Ring_slot EMPTY_RING_SLOT = '{0, 0, 0, 0, 0, 0, 0, 0};
+
+// Debug-print function.
+function string print_RS (Ring_slot RS);
+    string s;
+    s = $sformatf ("Data=%d, valid=%0d, from y,x=(%0d,%0d) -> (%0d,%0d)",
+		RS.data, RS.valid, RS.src_y, RS.src_x, RS.dst_y, RS.dst_x);
+    return (s);
+endfunction: print_RS
+
+endpackage : mesh_defs
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////
+
+///////////////////////////////////////////////////mesh stop//////////////////////////////////////////////////////
+
+/*
+ * The main mesh_stop module. It has code for a single mesh stop.
+ */
+module mesh_stop import mesh_defs::*; #(parameter MY_Y=0, MY_X=0)
+	(input Ring_slot
+		data_from_venv,	// data from the "rest of the MS" to us
+		vert_ring_in,	// incoming vertical-ring data
+		hori_ring_in,	// incoming horizontal-ring data
+	 input logic reset, clk,
+		venv_taking_data,	// Val env. is taking our data_to_venv
+	 output Ring_slot
+		data_to_venv,	// data from us to the "rest of the MS"
+		vert_ring_out,	// drive vertical ring
+		hori_ring_out,	// drive horizontal ring
+         output logic data_avail_for_venv, can_accept_data_from_env);
+
+  ////////////////////////////////////////////
+  // Parameters for this mesh stop
+  ////////////////////////////////////////////
+  parameter N_FIFO_ADDR_BITS=2;	// So all FIFOs are 4 deep.
+
+  ////////////////////////////////////////////
+  // I/O signals for the three FIFOs.
+  ////////////////////////////////////////////
+
+  // FIFO buffering data_from_venv waiting to drive the mesh (Drv Fifo)
+  Ring_slot DrvF_out;
+  logic DrvF_rd_en, DrvF_wr_en, DrvF_empty, DrvF_full;
+
+  // FIFO buffering incoming data from hori ring (HRx Fifo)
+  Ring_slot HRxF_out;
+  logic HRxF_rd_en, HRxF_wr_en, HRxF_empty, HRxF_full;
+ 
+  // FIFO buffering incoming data from vert ring (VRx Fifo)
+  Ring_slot VRxF_out;
+  logic VRxF_rd_en, VRxF_wr_en, VRxF_empty, VRxF_full;
+
+  ////////////////////////////////////////////
+  // I/O signals for the mux selects and outputs
+  ////////////////////////////////////////////
+
+  // The mux-select lines are all still undriven -- you'll drive them in the
+  // control logic.
+  Ring_slot vert_mux_out, hori_mux_out;
+  logic vert_sel_pass, vert_sel_me;                 //mux vert_ring_out
+  logic hori_sel_pass, hori_sel_me, hori_sel_turn;  //mux hori_ring_out
+  logic dtvenv_sel_HRx_FIFO, dtvenv_sel_VRx_FIFO;   //mux data_to_venv
+
+  ////////////////////////////////////////////
+  // Datapath instantiation
+  ////////////////////////////////////////////
+
+   always_comb begin
+    // Mux driving the vertical ring.
+    unique if (vert_sel_pass)	vert_mux_out = vert_ring_in;
+      else if (vert_sel_me)     vert_mux_out = DrvF_out;
+      else 			vert_mux_out = EMPTY_RING_SLOT;
+  
+    // Mux driving the horizontal ring.
+    unique if (hori_sel_pass)	hori_mux_out = hori_ring_in;
+      else if (hori_sel_turn)   hori_mux_out = VRxF_out;
+      else if (hori_sel_me)     hori_mux_out = DrvF_out;
+      else 			hori_mux_out = EMPTY_RING_SLOT;
+  
+    // Mux driving this mesh stop's output to the verification environment
+    // from the incoming vertical or horiz rings.
+    unique if (dtvenv_sel_VRx_FIFO)	data_to_venv = VRxF_out;
+      else if (dtvenv_sel_HRx_FIFO)	data_to_venv = HRxF_out;
+      else 				data_to_venv = EMPTY_RING_SLOT;
+  end	// always_comb
+
+  // Flop the ring-driver-mux outputs
+  always_ff @(posedge clk) begin
+    if (reset) begin
+	vert_ring_out <= EMPTY_RING_SLOT;
+	hori_ring_out <= EMPTY_RING_SLOT;
+    end else begin
+	vert_ring_out <= vert_mux_out;
+	hori_ring_out <= hori_mux_out;
+    end
+  end	// always_ff
+
+  // Instantiate VRx Fifo
+  fifo #(.DATA_TYPE(Ring_slot), .N_ADDR_BITS(N_FIFO_ADDR_BITS))
+    VRxF(.reset(reset), .clk(clk),
+	.wr_en(VRxF_wr_en), .rd_en(VRxF_rd_en),
+	.wr_data(vert_ring_in), .rd_data(VRxF_out),
+	.empty(VRxF_empty), .full(VRxF_full));
+
+  // Instantiate HRx Fifo
+  fifo #(.DATA_TYPE(Ring_slot), .N_ADDR_BITS(N_FIFO_ADDR_BITS))
+    HRxF(.reset(reset), .clk(clk),
+	.wr_en(HRxF_wr_en), .rd_en(HRxF_rd_en),
+	.wr_data(hori_ring_in), .rd_data(HRxF_out),
+	.empty(HRxF_empty), .full(HRxF_full));
+
+  // Instantiate Drv Fifo
+  fifo #(.DATA_TYPE(Ring_slot), .N_ADDR_BITS(N_FIFO_ADDR_BITS))
+    DRV(.reset(reset), .clk(clk),
+	.wr_en(DrvF_wr_en), .rd_en(DrvF_rd_en),
+	.wr_data(data_from_venv), .rd_data(DrvF_out),
+	.empty(DrvF_empty), .full(DrvF_full));
+
+  ////////////////////////////////////////////
+  // Control logic
+  ////////////////////////////////////////////
+
+  always_comb begin
+    //mux vert  pass>me>empty          vert>hori
+    unique if ((vert_ring_in.valid)&&(vert_ring_in.dst_y != MY_Y)) vert_sel_pass = 1;
+    else begin 
+      vert_sel_pass = 0; if ((DrvF_out.valid)&&(DrvF_out.dst_y != MY_Y)&&(DrvF_empty != 1)) vert_sel_me = 1;
+      else  vert_sel_me = 0;
+    end
+    
+    //&&(DrvF_out.dst_x != MY_X)&&(DrvF_out.dst_y == MY_Y)&&(DrvF_empty!=1)
+    
+    //mux hori  pass>turn>me>empty     vert>hori
+    unique if ((hori_ring_in.valid)&&(hori_ring_in.dst_x != MY_X)) hori_sel_pass = 1;
+    else begin 
+      hori_sel_pass = 0; if ((VRxF_out.valid)&&(VRxF_out.dst_x != MY_X)&&(VRxF_empty != 1)) hori_sel_turn = 1;
+      else begin 
+        hori_sel_turn = 0; if ((DrvF_out.valid)&&(DrvF_out.dst_y == MY_Y)&&(DrvF_empty!=1)) hori_sel_me = 1;
+        else hori_sel_me = 0;
+      end
+    end
+    
+    //mux venv  pass>me>empty  vert>hori since the VRxF may contain the data needed by mux hori, so vert>hori helps mesh run faster
+    unique if ((VRxF_out.valid)&&(VRxF_out.dst_x == MY_X)&&(VRxF_full != 1)&&(VRxF_empty != 1)) dtvenv_sel_VRx_FIFO = 1;
+    else begin 
+      dtvenv_sel_VRx_FIFO = 0; if ((HRxF_out.valid)&&(HRxF_empty!=1)) dtvenv_sel_HRx_FIFO = 1;
+      else  dtvenv_sel_HRx_FIFO = 0;
+    end
+    
+    //output data_avail_for_venv
+    unique if (dtvenv_sel_VRx_FIFO||dtvenv_sel_HRx_FIFO) data_avail_for_venv = 1;
+    else data_avail_for_venv = 0;
+    
+    //output can_accept_data_from_venv
+    unique if (DrvF_full != 1) can_accept_data_from_env = 1;
+    else can_accept_data_from_env = 0;
+    
+    //Drv fifo
+    unique if ((DrvF_full!=1)&&(data_from_venv.valid)) DrvF_wr_en = 1;
+    else DrvF_wr_en =0;
+    unique if ((!vert_sel_pass)||((!hori_sel_pass)&&(!hori_sel_turn))) DrvF_rd_en = 1;
+    else DrvF_rd_en = 0;
+    
+    
+    //HRxF fifo
+    unique if ((hori_ring_in.valid)&&(!hori_sel_pass)&&(HRxF_full != 1)) HRxF_wr_en = 1;
+    else HRxF_wr_en = 0;
+    unique if (!dtvenv_sel_VRx_FIFO) HRxF_rd_en = 1;
+    else HRxF_rd_en = 0;
+    
+    //VRxF fifo
+    unique if ((vert_ring_in.valid)&&(!vert_sel_pass)&&(VRxF_full != 1)) VRxF_wr_en = 1;
+    else VRxF_wr_en = 0;
+    unique if (((!hori_sel_pass)||(dtvenv_sel_VRx_FIFO))) VRxF_rd_en = 1;
+    else VRxF_rd_en = 0;
+    
+
+
+  end	// always_comb
+endmodule
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////mesh NxN///////////////////////////////////////////////////
+
+
+
+import mesh_defs::*;
+
+module mesh_NxN #(parameter N=2)
+    (input Ring_slot
+	data_from_venv[N][N],// data from the "rest of the MS" to us
+     input logic reset, clk,
+	venv_taking_data[N][N],// Val env. is taking our data_to_venv
+     output Ring_slot
+	data_to_venv[N][N],	// data from us to the "rest of the MS"
+     output logic data_avail_for_venv[N][N], can_accept_data_from_env[N][N]);
+
+  // ALL INDICES IN THIS FILE ARE TREATED AS Y,X LOCATIONS (I.E., ROW,COLUMN),
+  // WHICH IS HOW MATRICES AND 2D ARRAYS USUALLY WORK.
+  // BUT IT IS NOT HOW COORDINATES ARE USUALLY GIVEN IN GEOMETRY.
+
+  ////////////////////////////////////////////
+  // Declare the ring signals.
+  ////////////////////////////////////////////
+  Ring_slot vert_ring[N][N],
+	    hori_ring[N][N];
+
+  ////////////////////////////////////////////
+  // Instantiantiate the NxN array of mesh stops
+  ////////////////////////////////////////////
+
+  // See https://stackoverflow.com/questions/12504837/
+  // verilog-generate-genvar-in-an-always-block
+  generate
+    genvar x, y;
+    for (y=0; y<N; ++y) begin : yloop
+	for (x=0; x<N; ++x) begin: xloop
+	    // We're building the instance, e.g., yloop[2].xloop[1].MS
+	    mesh_stop #(.MY_Y(y), .MY_X(x)) MS (
+		.reset(reset), .clk(clk),
+		.data_from_venv(data_from_venv[y][x]),
+		.data_to_venv(data_to_venv[y][x]),
+		.data_avail_for_venv(data_avail_for_venv[y][x]),
+		.venv_taking_data(venv_taking_data[y][x]),
+		.can_accept_data_from_env(can_accept_data_from_env[y][x]),
+		.vert_ring_in (vert_ring[y][x]),
+		.vert_ring_out(vert_ring[(y+1)%N][x]),
+		.hori_ring_in (hori_ring[y][x]),
+		.hori_ring_out(hori_ring[y][(x+1)%N]));
+	end // for x
+    end // for y
+  endgenerate
+endmodule

@@ -1,0 +1,311 @@
+$date
+	Thu Mar  4 22:32:54 2021
+$end
+$version
+	QuestaSim Version 2020.1_1
+$end
+$timescale
+	1ns
+$end
+
+$scope module tn_fifo $end
+$var parameter 32 ! N_ADDR_BITS $end
+$var parameter 32 " FIFO_WIDTH $end
+$var parameter 32 # n_flops $end
+$var reg 1 $ reset $end
+$var reg 1 % rd_en $end
+$var reg 1 & wr_en $end
+$var reg 1 ' clk $end
+$var reg 1 ( fifo_empty $end
+$var reg 1 ) fifo_full $end
+$var reg 2 * wr_data [1:0] $end
+$var reg 2 + fifo_rd_data [1:0] $end
+$var reg 2 , rm_rd_data [1:0] $end
+$var reg 1 - full $end
+$var reg 1 . empty $end
+$var integer 32 / n_items $end
+
+$scope function get_data $end
+$var reg 2 0 get_data [1:0] $end
+$upscope $end
+
+$scope begin scoreboard_checker $end
+$upscope $end
+
+$scope begin scoreboard_checker1 $end
+$upscope $end
+
+$scope begin scoreboard_checker2 $end
+$upscope $end
+
+$scope module F $end
+$var parameter 32 1 N_ADDR_BITS $end
+$var parameter 32 2 FIFO_DEPTH $end
+$var parameter 32 3 max_f $end
+$var parameter 32 4 min_f $end
+$var wire 1 5 reset $end
+$var wire 1 6 rd_en $end
+$var wire 1 7 wr_en $end
+$var wire 1 8 clk $end
+$var reg 2 9 wr_data [1:0] $end
+$var reg 1 : empty $end
+$var reg 1 ; full $end
+$var reg 2 < rd_data [1:0] $end
+$var reg 3 = rd_ptr [2:0] $end
+$var reg 3 > wr_ptr [2:0] $end
+$upscope $end
+$upscope $end
+
+$scope begin std $end
+$upscope $end
+$enddefinitions $end
+#0
+$dumpvars
+1$
+0%
+0&
+0'
+x(
+x)
+bx *
+bx +
+bx ,
+0-
+1.
+bx 9
+x:
+x;
+bx <
+bx =
+bx >
+bx 0
+b10 !
+b10 "
+b100 #
+b10 1
+b100 2
+b111 3
+b0 4
+b0 /
+08
+07
+06
+15
+$end
+#10
+1'
+18
+b0 =
+b0 >
+1:
+0;
+0)
+1(
+#20
+0'
+08
+0$
+1&
+1%
+b0 0
+b0 *
+b0 9
+05
+17
+16
+#30
+1'
+18
+b1 >
+b1 /
+0.
+0:
+0(
+#40
+0'
+08
+b1 0
+b1 *
+b1 9
+#50
+1'
+18
+b10 >
+b1 =
+b1 ,
+b1 <
+b1 +
+#60
+0'
+08
+#70
+1'
+18
+b11 >
+b10 =
+#80
+0'
+08
+b11 0
+b11 *
+b11 9
+#90
+1'
+18
+b100 >
+b11 =
+b11 ,
+b11 <
+b11 +
+#100
+0'
+08
+b1 0
+b1 *
+b1 9
+#110
+1'
+18
+b101 >
+b100 =
+b1 ,
+b1 <
+b1 +
+#120
+0'
+08
+0&
+07
+#130
+1'
+18
+b101 =
+b0 /
+1.
+1:
+1(
+#140
+0'
+08
+#150
+1'
+18
+#160
+0'
+08
+1&
+0%
+17
+06
+#170
+1'
+18
+b110 >
+b1 /
+0.
+0:
+0(
+#180
+0'
+08
+#190
+1'
+18
+b111 >
+b10 /
+#200
+0'
+08
+b10 0
+b10 *
+b10 9
+#210
+1'
+18
+b0 >
+b11 /
+#220
+0'
+08
+b1 0
+b1 *
+b1 9
+#230
+1'
+18
+b1 >
+b100 /
+1-
+1;
+1)
+#240
+0'
+08
+#250
+1'
+18
+#260
+0'
+08
+1%
+b10 0
+b10 *
+b10 9
+16
+#270
+1'
+18
+b110 =
+b11 /
+0-
+0;
+0)
+#280
+0'
+08
+b1 0
+b1 *
+b1 9
+#290
+1'
+18
+b10 >
+b111 =
+b10 ,
+b10 <
+b10 +
+#300
+0'
+08
+0&
+07
+#310
+1'
+18
+b0 =
+b10 /
+b1 ,
+b1 <
+b1 +
+#320
+0'
+08
+#330
+1'
+18
+b1 =
+b1 /
+#340
+0'
+08
+#350
+1'
+18
+b10 =
+b0 /
+1.
+1:
+1(
+#360
+0'
+08

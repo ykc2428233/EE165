@@ -1,0 +1,1 @@
+When we are trying to read and write in the same time when the FIFO is full or empty could be consider as a corner cases. Since it requires the FIFO to judge that it whether needs to read first or write first.

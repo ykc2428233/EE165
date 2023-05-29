@@ -1,0 +1,5 @@
+1. In this situation, 
+2. The coverage will hardly change since the FIFO is writing and reading simultaneously from the start, the FIFO will never be full under normal circumstances. So that part will not be covered.
+3. 
+4. The coverage will be better comparing to the previous strategy since every input goes randomly and the FIFO could become full and then become empty again. These alters will benifit the coverage and test the code more thoroughly.
+5.
